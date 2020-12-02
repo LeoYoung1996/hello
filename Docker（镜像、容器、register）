@@ -1,0 +1,193 @@
+Docker（镜像、容器、register）
+
+Register：1.用户检验
+		  2.镜像索引
+		  3.镜像存储
+
+Docker命令
+
+	启动 docker pull
+		 docker run
+
+	拉取镜像：
+		docker search centos
+		docker pull centos
+		docker pull nginx
+	查看镜像：
+		docker image ls
+
+1. docker commit
+	1.1 针对运行中的容器创建镜像
+		docker run --name img01 -it quay.io/quay/busybox
+
+		docker container commit -a "Leoyoung <xxx>" img01   #未指定仓库和标签的镜像
+
+		docker container commit -a "Leoyoung <xxx>" img01 devops/busybox:1.0.1  #指定仓库和标签
+
+		docker run --name busybox01 -it devops/busybox:1.0.1  #运行并查看
+	1.2 创建镜像并修改CMD参数
+		docker image inspect busybox:latest | grep -n CMD
+
+		docker container run --name busybox02 -it busybox
+
+		？？？
+
+2. image save & load
+	2.1 image save
+		docker image ls
+		docker image save d5fd027d1066 d8233ab899d4 f09fe80eb0e7 -o deveops.tar.gz 
+		docker save d5fd027d1066 d8233ab899d4 f09fe80eb0e7 -o deveops2.tar  ##未指定仓库和标签的镜像
+		file deveops2.tar deveops.tar.gz
+		gunzip deveops.tar.gz
+		tar tf deveops2.tar
+		docker image save nginx:latest busybox:latest devops/apache:1.0.1 -o output.tar
+	2.2 image load
+		docker image load -i /tmp/deveops2.tar
+		docker image ls -a  #使用 image save 导出时需要加 repostory和tag
+		docker image rm d8233ab899d4 f09fe80eb0e7 d5fd027d1066 #（imageID）
+		docker image load -i /tmp/output.tar
+
+3. container export & import
+	3.1 export
+		docker container run --name web01 -it busybox  #Run一个容器和httpd服务
+		docker container export -o web.tar web01  #将一个容器输入到镜像
+
+	3.2 import
+		docker image import /tmp/web.tar #未指定仓库和标签的镜像
+		docker image import /tmp/web.tar httpd:v0.1 #指定仓库和标签 （Not running httpd when start container.）
+		docker image import -c 'CMD ["/bin/httpd","-f","-h","/opt/website"]' /tmp/web.tar httpd:v0.2 ## 指定仓库、标签和CMD
+
+
+
+4. Network
+	4.1 Docker 容器网络信息查看
+		ip link show
+		docker network ls
+		docker network inspect bridge
+			        "Name": "bridge",
+
+            "Driver": "default",
+
+                    "Subnet": "172.17.0.0/16",  ## 子网地址池
+                    "Gateway": "172.17.0.1"     ## 网关
+
+        "Containers": {                         ## 包含的容器信息
+            "2efec0177ae1ed1d6f3705f6357f7c99157f2a74daa2082108c87a69a6b45e8c": {
+                "Name": "web01",
+                "EndpointID": "ca991021b1d70462551127cc34753ba1f745ab9c592ac3be56903693759c9132",
+                "MacAddress": "02:42:ac:11:00:02",
+                "IPv4Address": "172.17.0.2/16",
+
+            "com.docker.network.bridge.name": "docker0",  ## 网络名称
+            "com.docker.network.driver.mtu": "1500"       ## MTU
+    4.2 模拟网络名称空间
+    	ip netns add ns1   ## 创建网络名称空间
+    	ip netns add ns2
+
+    	ip netns list      ## 查看当前网络名称空间
+
+    	ip netns exec ns1 ip a  ## 在指定的网络名称空间中执行命令
+
+    	ip link add name veth1.1 type veth peer name veth1.2 ## 创建一对虚拟网卡
+		ip link show ## veth1.1和veth1.2是一对网卡
+
+		ip link set dev veth1.2 netns ns1 ## 将其中一个网卡一半接入网络名称空间
+		ip netns exec ns1 ip a            ## 接入的网卡处于未激活状态
+
+		ip netns exec ns1 ip link set dev veth1.2 name eth0  ## 对网卡设备改名
+		ip netns exec ns1 ip a
+
+		ip netns exec ns1 ifconfig -a
+			eth0: flags=4098<BROADCAST,MULTICAST>  mtu 1500
+        		ether a6:b3:2f:16:12:46  txqueuelen 1000  (Ethernet)
+        		RX packets 0  bytes 0 (0.0 B)
+        		RX errors 0  dropped 0  overruns 0  frame 0
+       			TX packets 0  bytes 0 (0.0 B)
+        		TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+			lo: flags=8<LOOPBACK>  mtu 65536
+        		loop  txqueuelen 1000  (Local Loopback)
+        		RX packets 0  bytes 0 (0.0 B)
+        		RX errors 0  dropped 0  overruns 0  frame 0
+        		TX packets 0  bytes 0 (0.0 B)
+        		TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+        ifconfig veth1.1 10.154.2.2         ## 激活宿主机的网卡
+        ip netns exec ns1 ifconfig eth0 10.154.2.3  ## 激活名称空间中的网卡
+        ip netns exec ns1 ifconfig -a
+        	eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
+		        inet 10.154.2.3  netmask 255.0.0.0  broadcast 10.255.255.255
+		        inet6 fe80::a4b3:2fff:fe16:1246  prefixlen 64  scopeid 0x20<link>
+		        ether a6:b3:2f:16:12:46  txqueuelen 1000  (Ethernet)
+		        RX packets 6  bytes 508 (508.0 B)
+		        RX errors 0  dropped 0  overruns 0  frame 0
+		        TX packets 6  bytes 508 (508.0 B)
+		        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+			lo: flags=8<LOOPBACK>  mtu 65536
+		        loop  txqueuelen 1000  (Local Loopback)
+		        RX packets 0  bytes 0 (0.0 B)
+		        RX errors 0  dropped 0  overruns 0  frame 0
+		        TX packets 0  bytes 0 (0.0 B)
+		        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+		ping -c 2 -w 1 10.154.2.3 ## 宿主机与网络名称空间中的网卡通信
+
+		ip link set dev veth1.1 netns ns2  ## 将宿主机中的另一半虚拟网卡移动到另一个网络名称空间中
+		ip netns exec ns2 ip link set dev veth1.1 name eth0
+		ip netns exec ns2 ifconfig eth0 10.154.2.9  ## 激活网卡
+
+		ip netns exec ns2 ping -c 1 -w 1 10.154.2.3 ## 两个名称空间实现通
+
+	4.3 容器的网络配置
+		容器创建时指定
+			docker run --name bx1 -it --rm busybox:latest  ## 默认的主机名是ID
+			docker run --name bx1 --hostname container-test-bx1 -it --rm busybox:latest ## 手动指定主机名
+		修改初始化配置
+			Docker 网络配置参数
+				{
+				    "bip": "192.168.1.5/24",                   # docker0桥的IP，定义这个IP后，其它非DNS的字段会自动计算
+				    "fixed-cidr": "10.20.0.0/16",              # IPv4 地址池
+				    "fixed-cidr-v6": "2001:db8::/64",          # IPv6 地址池
+				    "mtu": 1500,                               # MTU 数据包分片大小
+				    "default-gateway": "10.20.1.1",            # 默认IPv4网关
+				    "default-gateway-v6": "2001:db8:abcd::89", # 默认IPv6网关
+				    "dns": ["10.20.1.1","20.20.1.3"]           # 默认DNS地址
+				}
+
+		systemctl restart docker
+		ip a show docker0
+
+	4.4 Docker 网络模型
+		（1）None模型(仅lo)
+		（2）Bridge模型(docker0)
+			指定Bridge模式
+				docker container run --name bx1 -it --rm busybox:latest  ## 默认bridge模式
+			NAT 转发
+				宿主机所有地址中的随机端口
+					docker container run --name web -p 80 --rm nginx:lates
+					docker container port web  ## 查看容器的端口映射
+
+					netstat -lntp | grep docker ##监听在随机端口 32768
+
+					docker container inspect web | grep -w IPAddress ## 当前IP
+
+					iptables -t nat -nvL | grep 172.17.0.2 ## 自动创建DNAT规则
+
+				宿主机指定IP的随机端口
+					docker container run --name web -p 192.168.1.82::80 --rm nginx:lates
+					docker container port web
+
+				宿主机指定IP的指定端口
+					docker container run --name web -p 192.168.1.82:80:80 --rm nginx:lates
+					docker container port web
+
+				宿主机所有地址中的指定端口
+					docker container run --name web -p 80:80 --rm nginx:latest
+					docker container port web
+
+				宿主机多个端口映射到容器
+					docker container run --name web -p 80:80 -p 8080:80 --rm nginx:latest
+					docker container port web
+		（3）Join 模型(联盟式)
+		（4）Open 模型(共享宿主机网络)
